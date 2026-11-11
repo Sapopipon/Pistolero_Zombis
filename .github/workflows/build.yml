@@ -1,0 +1,58 @@
+name: Compilar APK desde ZIP
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Descomprimir el ZIP del proyecto
+        run: |
+          ZIP=$(ls *.zip 2>/dev/null | head -n 1)
+          if [ -z "$ZIP" ]; then
+            echo "No encontré ningún .zip en la raíz del repositorio"; exit 1
+          fi
+          echo "Usando: $ZIP"
+          mkdir -p _proyecto
+          unzip -q "$ZIP" -d _proyecto
+          GRADLE_FILE=$(find _proyecto -name settings.gradle -not -path '*/node_modules/*' | head -n 1)
+          if [ -z "$GRADLE_FILE" ]; then
+            echo "El zip no contiene un proyecto Android (settings.gradle)"; exit 1
+          fi
+          echo "PROYECTO_DIR=$(dirname "$GRADLE_FILE")" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+
+      - name: Compilar APK
+        working-directory: ${{ env.PROYECTO_DIR }}
+        run: gradle assembleDebug --no-daemon
+
+      - name: Copiar APK
+        run: cp "${{ env.PROYECTO_DIR }}/app/build/outputs/apk/debug/app-debug.apk" pistolero-del-oeste.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pistolero-del-oeste-apk
+          path: pistolero-del-oeste.apk
+
+      - name: Publicar release (solo con tags v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: pistolero-del-oeste.apk
